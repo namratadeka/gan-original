@@ -12,11 +12,31 @@ class Gan(object):
 
         '''
 
-    def generator(self):
+    def generator(self, x):
         '''
 
         :return:
         '''
+        mu = 0
+        sigma = 0.1
+
+        fc1_W = tf.Variable(tf.truncated_normal(shape=(3072,8000), mean=mu, stddev=sigma))
+        fc1_b = tf.Variable(tf.zeros(8000))
+        fc1 = tf.matmul(x, fc1_W) + fc1_b
+
+        fc1 = tf.nn.relu(fc1)
+
+        fc2_W = tf.Variable(tf.truncated_normal(shape=(8000,8000), mean=mu, stddev=sigma))
+        fc2_b = tf.Variable(tf.zeros(8000))
+        fc2 = tf.matmul(fc1, fc2_W) + fc2_b
+
+        fc2 = tf.nn.sigmoid(fc2)
+
+        conv0 = tf.reshape(fc2, shape=np.array([-1,10,10,80]))
+
+        deconv = tf.layers.conv2d_transpose(conv0, filters=3, kernel_size=(5,5), strides=(3,3))
+        return deconv
+
 
     def discriminator(self, x):
         '''
@@ -70,10 +90,10 @@ class Gan(object):
 
 
 g = Gan()
-img = np.random.random_sample((1,32,32,3))
-x = tf.placeholder(tf.float32, (None, 32,32,3))
-logits = g.discriminator(x)
+noise = np.random.random_sample((1,3072))
+x = tf.placeholder(tf.float32, (None, 3072))
+img = g.generator(x)
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-    res = sess.run(logits, feed_dict = {x: img})
+    res = sess.run(img, feed_dict = {x: noise})
     print(res)
