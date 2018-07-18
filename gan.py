@@ -12,6 +12,45 @@ class Gan(object):
 
         '''
 
+    def train(self):
+        '''
+
+        :return:
+        '''
+        noise = tf.placeholder(tf.float32, (None, 3072))
+        image = tf.placeholder(tf.float32, (None, 32, 32, 3))
+        img_prob = self.discriminator(image)
+        d_loss = self.discriminator_loss(noise, image)
+        g_loss = self.generator_loss(noise)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+        train_generator = optimizer.minimize(g_loss)
+        train_discriminator = optimizer.maximize(d_loss)
+
+
+    def discriminator_loss(self, noise, image):
+        '''
+
+        :param noise:
+        :param image:
+        :return:
+        '''
+        gen_image = self.generator(noise)
+        gen_image_prob = self.discriminator(gen_image)
+        image_prob = self.discriminator(image)
+        return tf.reduce_mean(tf.log(image_prob) + tf.log(1 - gen_image_prob))
+
+
+    def generator_loss(self, noise):
+        '''
+
+        :param noise:
+        :return:
+        '''
+        gen_image = self.generator(noise)
+        gen_image_prob = self.discriminator(gen_image)
+        return tf.reduce_mean(tf.log(1 - gen_image_prob))
+
+
     def generator(self, x):
         '''
 
