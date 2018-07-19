@@ -1,3 +1,10 @@
 .idea/*
 __pycache__/*
 *.pyc
+checkpoint
+gan-out/*
+gan.data-00000*
+gan.index
+gan.meta
+mnist/*
+datasets/*

@@ -3,8 +3,14 @@ import pickle
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from mnist import MNIST
 
-import pdb
+
+def xavier_init(size):
+    in_dim = size[0]
+    xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
+    return tf.random_normal(shape=size, stddev=xavier_stddev)
+
 
 class Gan(object):
     '''
@@ -14,41 +20,69 @@ class Gan(object):
         '''
 
         '''
-        self.epochs = 10
-        self.d_epochs = 5
+        self.epochs = 10000
+        self.d_epochs = 1
         self.minibatch = 128
-        self.data = self.get_data()
+        self.data = self.get_mnist()
+        self.noise = tf.placeholder(tf.float32, (None, 100))
+        self.image = tf.placeholder(tf.float32, (None, 784))
+        self.discriminator_nodes(self.image)
+        self.generator_nodes(self.noise)
         self.train_ops()
+        self.gen_loss = []
+        self.dis_loss = []
+        self.prob = []
 
     def train_ops(self):
         '''
 
         :return:
         '''
-        self.noise = tf.placeholder(tf.float32, (None, 3072))
-        self.image = tf.placeholder(tf.float32, (None, 32, 32, 3))
         self.d_loss = self.discriminator_loss(self.noise, self.image)
         self.g_loss = self.generator_loss(self.noise)
-        optimizer = tf.train.MomentumOptimizer(learning_rate=0.004, momentum=0.5)
-        self.train_generator = optimizer.minimize(self.g_loss)
-        self.train_discriminator = optimizer.minimize(-1*self.d_loss)
+        optimizer = tf.train.AdamOptimizer()
         self.generated_img = self.generator(self.noise)
+        self.image_probability = self.expected_probability(self.noise)
+        self.sample_probabilities, _ = self.discriminator(self.generated_img)
+
+        ## MODIFIED LOSS FUNCTION
+        # self.real_prob, self.real_logit = self.discriminator(self.image)
+        # self.fake_prob, self.fake_logit = self.discriminator(self.generated_img)
+        #
+        # self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.real_logit, labels=tf.ones_like(self.real_logit)))
+        # self.d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.fake_logit, labels=tf.zeros_like(self.fake_logit)))
+        # self.d_loss = self.d_loss_real + self.d_loss_fake
+        # self.g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.fake_logit, labels=tf.ones_like(self.fake_logit)))
+
+        self.train_generator = optimizer.minimize(self.g_loss, var_list=self.theta_G)
+        self.train_discriminator = optimizer.minimize(self.d_loss, var_list=self.theta_D)
+
         self.saver = tf.train.Saver()
 
     def train(self):
+        '''
+
+        :return:
+        '''
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
             for i in range(self.epochs):
+                print("EPOCH %d" % i)
                 for j in range(self.d_epochs):
                     X_noise = self.noise_generator(self.minibatch)
                     X_data = self.data[np.random.choice(self.data.shape[0], self.minibatch)]
-                    sess.run(self.train_discriminator, feed_dict={self.noise: X_noise, self.image: X_data})
-                    print("discriminator loss: %f" % (sess.run(self.d_loss, feed_dict={self.noise: X_noise, self.image: X_data})))
+                    _, loss = sess.run([self.train_discriminator,self.d_loss], feed_dict={self.noise: X_noise, self.image: X_data})
+                    print("discriminator loss: %f" % loss)
+                    self.dis_loss.append(loss)
 
                 X_noise = self.noise_generator(self.minibatch)
-                sess.run(self.train_generator, feed_dict={self.noise: X_noise})
-                print("EPOCH %d"%i)
-                print("generator loss: %f"%(sess.run(self.g_loss, feed_dict={self.noise: X_noise})))
+                _, loss, probs, img = sess.run([self.train_generator, self.g_loss, self.sample_probabilities, self.generated_img], feed_dict={self.noise: X_noise})
+                print("generator loss: %f" % loss)
+                self.gen_loss.append(loss)
+                self.prob.append(np.mean(probs))
+                if np.max(probs) >= 0.5:
+                    self.save_fig(img[np.argmax(probs)], i)
+
             self.saver.save(sess, './gan')
             print('Model saved.')
 
@@ -61,8 +95,19 @@ class Gan(object):
             x = self.noise_generator(1)
             self.saver.restore(sess, tf.train.latest_checkpoint('.'))
             img = sess.run(self.generated_img, feed_dict={self.noise: x})
-            plt.imshow(img[0]*255)
-            plt.show()
+            prob = sess.run(self.image_probability, feed_dict={self.noise: x})
+            print("Probability of generated image is %f"%prob)
+            plt.imshow(img[0].reshape((28,28)), cmap='Greys_r')
+
+    def expected_probability(self, noise):
+        '''
+
+        :param noise:
+        :return:
+        '''
+        gen_img = self.generator(noise)
+        prob, _ = self.discriminator(gen_img)
+        return tf.reduce_mean(prob)
 
     def discriminator_loss(self, noise, image):
         '''
@@ -72,9 +117,9 @@ class Gan(object):
         :return:
         '''
         gen_image = self.generator(noise)
-        gen_image_prob = self.discriminator(gen_image)
-        image_prob = self.discriminator(image)
-        return tf.reduce_mean(tf.log(image_prob) + tf.log(1 - gen_image_prob))
+        gen_image_prob, _ = self.discriminator(gen_image)
+        image_prob, _ = self.discriminator(image)
+        return -tf.reduce_mean(tf.log(image_prob) + tf.log(1 - gen_image_prob))
 
     def generator_loss(self, noise):
         '''
@@ -83,83 +128,66 @@ class Gan(object):
         :return:
         '''
         gen_image = self.generator(noise)
-        gen_image_prob = self.discriminator(gen_image)
-        return tf.reduce_mean(tf.log(1 - gen_image_prob))
+        gen_image_prob, _ = self.discriminator(gen_image)
+        return -tf.reduce_mean(tf.log(gen_image_prob))
+
+    def generator_nodes(self, x):
+        '''
+
+        :param x:
+        :return:
+        '''
+        mu = 0
+        sigma = 0.0001
+        self.g_fc1_W = tf.Variable(xavier_init([100, 128]))#tf.truncated_normal(shape=(100, 128), mean=mu, stddev=sigma))
+        self.g_fc1_b = tf.Variable(tf.zeros(128))
+
+        self.g_fc2_W = tf.Variable(xavier_init([128,784]))#tf.truncated_normal(shape=(128, 784), mean=mu, stddev=sigma))
+        self.g_fc2_b = tf.Variable(tf.zeros(784))
+
+        self.theta_G = [self.g_fc1_W, self.g_fc1_W, self.g_fc2_W, self.g_fc2_b]
+
 
     def generator(self, x):
         '''
 
         :return:
         '''
-        mu = 0.5
-        sigma = 0.01
-
-        fc1_W = tf.Variable(tf.truncated_normal(shape=(3072,8000), mean=mu, stddev=sigma))
-        fc1_b = tf.Variable(tf.zeros(8000))
-        fc1 = tf.matmul(x, fc1_W) + fc1_b
-
+        fc1 = tf.matmul(x, self.g_fc1_W) + self.g_fc1_b
         fc1 = tf.nn.relu(fc1)
+        fc3 = tf.matmul(fc1, self.g_fc2_W) + self.g_fc2_b
+        fc3 = tf.nn.tanh(fc3)
 
-        fc2_W = tf.Variable(tf.truncated_normal(shape=(8000,8000), mean=mu, stddev=sigma))
-        fc2_b = tf.Variable(tf.zeros(8000))
-        fc2 = tf.matmul(fc1, fc2_W) + fc2_b
+        return fc3
 
-        fc2 = tf.nn.sigmoid(fc2)
 
-        conv0 = tf.reshape(fc2, shape=np.array([-1,10,10,80]))
+    def discriminator_nodes(self, x):
+        '''
 
-        deconv = tf.layers.conv2d_transpose(conv0, filters=3, kernel_size=(5,5), strides=(3,3))
-        return deconv
+        :param x:
+        :return:
+        '''
+        mu = 0
+        sigma = 0.0001
+        self.d_fc1_W = tf.Variable(xavier_init([784, 128]))#tf.truncated_normal(shape=(784, 128), mean=mu, stddev=sigma))
+        self.d_fc1_b = tf.Variable(tf.zeros(128))
+
+        self.d_fc2_W = tf.Variable(xavier_init([128,1]))#tf.truncated_normal(shape=(128, 1), mean=mu, stddev=sigma))
+        self.d_fc2_b = tf.Variable(tf.zeros(1))
+
+        self.theta_D = [self.d_fc1_W, self.d_fc1_b, self.d_fc2_W, self.d_fc2_b]
 
     def discriminator(self, x):
         '''
 
         :return:
         '''
-        mu = 0.5
-        sigma = 0.01
 
-        padding_1 = tf.constant([[0,0], [4, 4], [4, 4], [0,0]])
-        x = tf.pad(x, padding_1, "CONSTANT")
-
-        conv1_W = tf.Variable(tf.truncated_normal(shape=(8,8,3,32), mean=mu, stddev=sigma))
-        conv1_b = tf.Variable(tf.zeros(32))
-        conv1 = tf.nn.conv2d(x, conv1_W, strides=[1,1,1,1], padding='VALID') + conv1_b
-
-        conv1 = tf.nn.max_pool(conv1, ksize=[1,4,4,1], strides=[1,2,2,1], padding='VALID')
-
-        padding_2 = tf.constant([[0,0], [3,3], [3,3], [0,0]])
-        conv1 = tf.pad(conv1, padding_2, "CONSTANT")
-
-        conv2_W = tf.Variable(tf.truncated_normal(shape=(8, 8, 32, 32), mean=mu, stddev=sigma))
-        conv2_b = tf.Variable(tf.zeros(32))
-        conv2 = tf.nn.conv2d(conv1, conv2_W, strides=[1, 1, 1, 1], padding='VALID') + conv2_b
-
-        conv2 = tf.nn.max_pool(conv2, ksize=[1, 4, 4, 1], strides=[1, 2, 2, 1], padding='VALID')
-
-        padding_3 = tf.constant([[0,0], [3,3], [3,3], [0,0]])
-        conv2 = tf.pad(conv2, padding_3, "CONSTANT")
-
-        conv3_W = tf.Variable(tf.truncated_normal(shape=(5, 5, 32, 192), mean=mu, stddev=sigma))
-        conv3_b = tf.Variable(tf.zeros(192))
-        conv3 = tf.nn.conv2d(conv2, conv3_W, strides=[1, 1, 1, 1], padding='VALID') + conv3_b
-
-        conv3 = tf.nn.max_pool(conv3, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
-
-        fc0 = tf.contrib.layers.flatten(conv3)
-
-        fc1_W = tf.Variable(tf.truncated_normal(shape=(3072,500), mean=mu, stddev=sigma))
-        fc1_b = tf.Variable(tf.zeros(500))
-        fc1 = tf.matmul(fc0, fc1_W) + fc1_b
-
-        fc1 = tf.contrib.layers.maxout(fc1, num_units=5)
-
-        fc2_W = tf.Variable(tf.truncated_normal(shape=(5,1), mean=mu, stddev=sigma))
-        fc2_b = tf.Variable(tf.zeros(1))
-        fc2 = tf.matmul(fc1, fc2_W) + fc2_b
-
-        logits = tf.nn.sigmoid(fc2)
-        return logits
+        fc1 = tf.matmul(x, self.d_fc1_W) + self.d_fc1_b
+        fc1 = tf.nn.relu(fc1)
+        logit = tf.matmul(fc1, self.d_fc2_W) + self.d_fc2_b
+        prob = tf.nn.sigmoid(logit)
+        return prob, logit
 
     def noise_generator(self, m):
         '''
@@ -167,9 +195,23 @@ class Gan(object):
         :param m:
         :return:
         '''
-        return np.random.normal(size=(m,3072))
+        return np.random.uniform(-1, 1, size=(m,100))
 
-    def get_data(self):
+    def save_fig(self, img, i):
+        '''
+
+        :param img:
+        :return:
+        '''
+        if not os.path.exists('./gan-out/'):
+            os.makedirs('./gan-out/')
+        fig = plt.figure()
+        plt.imshow(img.reshape(28, 28))
+        plt.savefig('./gan-out/epoch-%d.png'%i)
+        plt.close(fig)
+
+
+    def get_cifar10(self):
         '''
 
         :return:
@@ -182,16 +224,42 @@ class Gan(object):
         imgs = []
         for file in files:
             dict = pickle.load(open(file,'rb'), encoding='bytes')
-            idx = np.where(np.array(dict[b'labels']) == 5)[0]
-            r = np.append(r, (dict[b'data'][idx][:,:1024]).reshape((len(idx), 32, 32)), axis=0)
-            g = np.append(g, (dict[b'data'][idx][:,1024:2048]).reshape((len(idx), 32, 32)), axis=0)
-            b = np.append(b, (dict[b'data'][idx][:,2048:3072]).reshape((len(idx), 32, 32)), axis=0)
+            size = len(dict[b'data'])
+            r = np.append(r, (dict[b'data'][:,:1024]).reshape((size, 32, 32)), axis=0)
+            g = np.append(g, (dict[b'data'][:,1024:2048]).reshape((size, 32, 32)), axis=0)
+            b = np.append(b, (dict[b'data'][:,2048:3072]).reshape((size, 32, 32)), axis=0)
         for i in range(r.shape[0]):
             img = np.dstack((r[i,:], g[i,:], b[i,:]))
             imgs.append(img)
         return np.array(imgs)/255.0
 
+    def get_mnist(self):
+        '''
+
+        :return:
+        '''
+        mndata = MNIST('./datasets/')
+        X_, _ = mndata.load_training()
+        X_test, _ = mndata.load_testing()
+        data = np.array(X_ + X_test)
+        return data/255
+
+
 
 g = Gan()
 g.train()
 g.test()
+figure = plt.figure()
+plt.subplot(3,1,1)
+plt.plot(list(range(len(g.dis_loss))), g.dis_loss)
+plt.ylabel("Discriminator loss")
+plt.xlabel("Epoch")
+plt.subplot(3,1,2)
+plt.plot(list(range(len(g.gen_loss))), g.gen_loss)
+plt.ylabel("Generator loss")
+plt.xlabel("Epoch")
+plt.subplot(3,1,3)
+plt.plot(list(range(len(g.prob))), g.prob)
+plt.ylabel("Expected probability")
+plt.xlabel("Epoch")
+plt.show()
