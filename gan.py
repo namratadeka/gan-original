@@ -5,11 +5,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from mnist import MNIST
 
-
-def xavier_init(size):
-    in_dim = size[0]
-    xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-    return tf.random_normal(shape=size, stddev=xavier_stddev)
+from networks import Network
 
 
 class Gan(object):
@@ -26,8 +22,9 @@ class Gan(object):
         self.data = self.get_mnist()
         self.noise = tf.placeholder(tf.float32, (None, 100))
         self.image = tf.placeholder(tf.float32, (None, 784))
-        self.discriminator_nodes(self.image)
-        self.generator_nodes(self.noise)
+        self.net = Network()
+        self.net.discriminator_layers_mnist()
+        self.net.generator_layers_mnist()
         self.train_ops()
         self.gen_loss = []
         self.dis_loss = []
@@ -41,21 +38,11 @@ class Gan(object):
         self.d_loss = self.discriminator_loss(self.noise, self.image)
         self.g_loss = self.generator_loss(self.noise)
         optimizer = tf.train.AdamOptimizer()
-        self.generated_img = self.generator(self.noise)
+        self.generated_img = self.net.generator_ops_mnist(self.noise)
         self.image_probability = self.expected_probability(self.noise)
-        self.sample_probabilities, _ = self.discriminator(self.generated_img)
-
-        ## MODIFIED LOSS FUNCTION
-        # self.real_prob, self.real_logit = self.discriminator(self.image)
-        # self.fake_prob, self.fake_logit = self.discriminator(self.generated_img)
-        #
-        # self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.real_logit, labels=tf.ones_like(self.real_logit)))
-        # self.d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.fake_logit, labels=tf.zeros_like(self.fake_logit)))
-        # self.d_loss = self.d_loss_real + self.d_loss_fake
-        # self.g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.fake_logit, labels=tf.ones_like(self.fake_logit)))
-
-        self.train_generator = optimizer.minimize(self.g_loss, var_list=self.theta_G)
-        self.train_discriminator = optimizer.minimize(self.d_loss, var_list=self.theta_D)
+        self.sample_probabilities, _ = self.net.discriminator_ops_mnist(self.generated_img)
+        self.train_generator = optimizer.minimize(self.g_loss, var_list=self.net.theta_G)
+        self.train_discriminator = optimizer.minimize(self.d_loss, var_list=self.net.theta_D)
 
         self.saver = tf.train.Saver()
 
@@ -105,8 +92,8 @@ class Gan(object):
         :param noise:
         :return:
         '''
-        gen_img = self.generator(noise)
-        prob, _ = self.discriminator(gen_img)
+        gen_img = self.net.generator_ops_mnist(noise)
+        prob, _ = self.net.discriminator_ops_mnist(gen_img)
         return tf.reduce_mean(prob)
 
     def discriminator_loss(self, noise, image):
@@ -116,9 +103,9 @@ class Gan(object):
         :param image:
         :return:
         '''
-        gen_image = self.generator(noise)
-        gen_image_prob, _ = self.discriminator(gen_image)
-        image_prob, _ = self.discriminator(image)
+        gen_image = self.net.generator_ops_mnist(noise)
+        gen_image_prob, _ = self.net.discriminator_ops_mnist(gen_image)
+        image_prob, _ = self.net.discriminator_ops_mnist(image)
         return -tf.reduce_mean(tf.log(image_prob) + tf.log(1 - gen_image_prob))
 
     def generator_loss(self, noise):
@@ -127,67 +114,9 @@ class Gan(object):
         :param noise:
         :return:
         '''
-        gen_image = self.generator(noise)
-        gen_image_prob, _ = self.discriminator(gen_image)
+        gen_image = self.net.generator_ops_mnist(noise)
+        gen_image_prob, _ = self.net.discriminator_ops_mnist(gen_image)
         return -tf.reduce_mean(tf.log(gen_image_prob))
-
-    def generator_nodes(self, x):
-        '''
-
-        :param x:
-        :return:
-        '''
-        mu = 0
-        sigma = 0.0001
-        self.g_fc1_W = tf.Variable(xavier_init([100, 128]))#tf.truncated_normal(shape=(100, 128), mean=mu, stddev=sigma))
-        self.g_fc1_b = tf.Variable(tf.zeros(128))
-
-        self.g_fc2_W = tf.Variable(xavier_init([128,784]))#tf.truncated_normal(shape=(128, 784), mean=mu, stddev=sigma))
-        self.g_fc2_b = tf.Variable(tf.zeros(784))
-
-        self.theta_G = [self.g_fc1_W, self.g_fc1_W, self.g_fc2_W, self.g_fc2_b]
-
-
-    def generator(self, x):
-        '''
-
-        :return:
-        '''
-        fc1 = tf.matmul(x, self.g_fc1_W) + self.g_fc1_b
-        fc1 = tf.nn.relu(fc1)
-        fc3 = tf.matmul(fc1, self.g_fc2_W) + self.g_fc2_b
-        fc3 = tf.nn.tanh(fc3)
-
-        return fc3
-
-
-    def discriminator_nodes(self, x):
-        '''
-
-        :param x:
-        :return:
-        '''
-        mu = 0
-        sigma = 0.0001
-        self.d_fc1_W = tf.Variable(xavier_init([784, 128]))#tf.truncated_normal(shape=(784, 128), mean=mu, stddev=sigma))
-        self.d_fc1_b = tf.Variable(tf.zeros(128))
-
-        self.d_fc2_W = tf.Variable(xavier_init([128,1]))#tf.truncated_normal(shape=(128, 1), mean=mu, stddev=sigma))
-        self.d_fc2_b = tf.Variable(tf.zeros(1))
-
-        self.theta_D = [self.d_fc1_W, self.d_fc1_b, self.d_fc2_W, self.d_fc2_b]
-
-    def discriminator(self, x):
-        '''
-
-        :return:
-        '''
-
-        fc1 = tf.matmul(x, self.d_fc1_W) + self.d_fc1_b
-        fc1 = tf.nn.relu(fc1)
-        logit = tf.matmul(fc1, self.d_fc2_W) + self.d_fc2_b
-        prob = tf.nn.sigmoid(logit)
-        return prob, logit
 
     def noise_generator(self, m):
         '''
@@ -243,7 +172,6 @@ class Gan(object):
         X_test, _ = mndata.load_testing()
         data = np.array(X_ + X_test)
         return data/255
-
 
 
 g = Gan()
