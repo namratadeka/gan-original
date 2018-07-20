@@ -7,6 +7,7 @@ from mnist import MNIST
 
 from networks import Network
 
+import pdb
 
 class Gan(object):
     '''
@@ -19,12 +20,12 @@ class Gan(object):
         self.epochs = 10000
         self.d_epochs = 1
         self.minibatch = 128
-        self.data = self.get_mnist()
-        self.noise = tf.placeholder(tf.float32, (None, 100))
-        self.image = tf.placeholder(tf.float32, (None, 784))
+        self.data = self.get_cifar10()
+        self.noise = tf.placeholder(tf.float32, (None, 3072))
+        self.image = tf.placeholder(tf.float32, (None, 32, 32, 3))
         self.net = Network()
-        self.net.discriminator_layers_mnist()
-        self.net.generator_layers_mnist()
+        self.net.discriminator_layers_cifar10()
+        self.net.generator_layers_cifar10()
         self.train_ops()
         self.gen_loss = []
         self.dis_loss = []
@@ -37,10 +38,10 @@ class Gan(object):
         '''
         self.d_loss = self.discriminator_loss(self.noise, self.image)
         self.g_loss = self.generator_loss(self.noise)
-        optimizer = tf.train.AdamOptimizer()
-        self.generated_img = self.net.generator_ops_mnist(self.noise)
+        optimizer = tf.train.MomentumOptimizer(momentum=0.5, learning_rate=0.004)
+        self.generated_img = self.net.generator_ops_cifar10(self.noise)
         self.image_probability = self.expected_probability(self.noise)
-        self.sample_probabilities, _ = self.net.discriminator_ops_mnist(self.generated_img)
+        self.sample_probabilities, _ = self.net.discriminator_ops_cifar10(self.generated_img)
         self.train_generator = optimizer.minimize(self.g_loss, var_list=self.net.theta_G)
         self.train_discriminator = optimizer.minimize(self.d_loss, var_list=self.net.theta_D)
 
@@ -67,10 +68,10 @@ class Gan(object):
                 print("generator loss: %f" % loss)
                 self.gen_loss.append(loss)
                 self.prob.append(np.mean(probs))
-                if np.max(probs) >= 0.5:
+                if np.max(probs) >= 0.3:
                     self.save_fig(img[np.argmax(probs)], i)
 
-            self.saver.save(sess, './gan')
+            self.saver.save(sess, './gan-cifar10')
             print('Model saved.')
 
     def test(self):
@@ -84,7 +85,7 @@ class Gan(object):
             img = sess.run(self.generated_img, feed_dict={self.noise: x})
             prob = sess.run(self.image_probability, feed_dict={self.noise: x})
             print("Probability of generated image is %f"%prob)
-            plt.imshow(img[0].reshape((28,28)), cmap='Greys_r')
+            plt.imshow(img[0])
 
     def expected_probability(self, noise):
         '''
@@ -92,8 +93,8 @@ class Gan(object):
         :param noise:
         :return:
         '''
-        gen_img = self.net.generator_ops_mnist(noise)
-        prob, _ = self.net.discriminator_ops_mnist(gen_img)
+        gen_img = self.net.generator_ops_cifar10(noise)
+        prob, _ = self.net.discriminator_ops_cifar10(gen_img)
         return tf.reduce_mean(prob)
 
     def discriminator_loss(self, noise, image):
@@ -103,9 +104,9 @@ class Gan(object):
         :param image:
         :return:
         '''
-        gen_image = self.net.generator_ops_mnist(noise)
-        gen_image_prob, _ = self.net.discriminator_ops_mnist(gen_image)
-        image_prob, _ = self.net.discriminator_ops_mnist(image)
+        gen_image = self.net.generator_ops_cifar10(noise)
+        gen_image_prob, _ = self.net.discriminator_ops_cifar10(gen_image)
+        image_prob, _ = self.net.discriminator_ops_cifar10(image)
         return -tf.reduce_mean(tf.log(image_prob) + tf.log(1 - gen_image_prob))
 
     def generator_loss(self, noise):
@@ -114,8 +115,8 @@ class Gan(object):
         :param noise:
         :return:
         '''
-        gen_image = self.net.generator_ops_mnist(noise)
-        gen_image_prob, _ = self.net.discriminator_ops_mnist(gen_image)
+        gen_image = self.net.generator_ops_cifar10(noise)
+        gen_image_prob, _ = self.net.discriminator_ops_cifar10(gen_image)
         return -tf.reduce_mean(tf.log(gen_image_prob))
 
     def noise_generator(self, m):
@@ -124,7 +125,7 @@ class Gan(object):
         :param m:
         :return:
         '''
-        return np.random.uniform(-1, 1, size=(m,100))
+        return np.random.uniform(-1, 1, size=(m,3072))
 
     def save_fig(self, img, i):
         '''
@@ -132,13 +133,12 @@ class Gan(object):
         :param img:
         :return:
         '''
-        if not os.path.exists('./gan-out/'):
-            os.makedirs('./gan-out/')
+        if not os.path.exists('./gan-out-cifar10/'):
+            os.makedirs('./gan-out-cifar10/')
         fig = plt.figure()
-        plt.imshow(img.reshape(28, 28))
-        plt.savefig('./gan-out/epoch-%d.png'%i)
+        plt.imshow(img)
+        plt.savefig('./gan-out-cifar10/epoch-%d.png'%i)
         plt.close(fig)
-
 
     def get_cifar10(self):
         '''
