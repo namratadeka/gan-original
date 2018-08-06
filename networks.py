@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def xavier_init(size):
+def xavier_std(size):
     '''
 
     :param size:
@@ -9,143 +9,218 @@ def xavier_init(size):
     '''
     in_dim = size[0]
     xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
-    return tf.random_normal(shape=size, stddev=xavier_stddev)
+    return xavier_stddev
 
 
 class Network(object):
     '''
 
     '''
-    def generator_layers_mnist(self):
+
+    def cifar10_generator(self, inputs, is_training=False, reuse=False, name='generator'):
         '''
 
+        :param is_training:
+        :param reuse:
+        :param name:
         :return:
         '''
-        self.g_fc1_W = tf.Variable(xavier_init([100, 128]))
-        self.g_fc1_b = tf.Variable(tf.zeros(128))
+        with tf.variable_scope(name, reuse=reuse):
+            normal_initializer = tf.random_normal_initializer(mean=0.0, stddev=0.02)
 
-        self.g_fc2_W = tf.Variable(xavier_init([128, 784]))
-        self.g_fc2_b = tf.Variable(tf.zeros(784))
+            inputs = tf.expand_dims(tf.expand_dims(inputs, 1), 1)
 
-        self.theta_G = [self.g_fc1_W, self.g_fc1_W, self.g_fc2_W, self.g_fc2_b]
+            ## deconv output = [batch, 4, 4, 1024]
+            net = tf.layers.conv2d_transpose(inputs,
+                                             filters=1024,
+                                             kernel_size=4,
+                                             padding='valid',
+                                             kernel_initializer=normal_initializer,
+                                             trainable=is_training,
+                                             name='tconv1')
+            net = tf.layers.batch_normalization(net,
+                                                training=is_training,
+                                                name='tconv1/batch_normalization')
+            net = tf.nn.relu(net, name='tconv1/relu')
+            # pdb.set_trace()
+            ##deconv output = [batch, 8, 8, 256]
+            net = tf.layers.conv2d_transpose(net,
+                                             filters=256,
+                                             kernel_size=4,
+                                             strides=2,
+                                             padding='same',
+                                             kernel_initializer=normal_initializer,
+                                             trainable=is_training,
+                                             name='tconv2')
+            net = tf.layers.batch_normalization(net,
+                                                training=is_training,
+                                                name='tconv2/batch_normalization')
+            net = tf.nn.relu(net, name='tconv2/relu')
 
-    def generator_ops_mnist(self,x):
+            # deconv output = [batch, 16, 16, 64]
+            net = tf.layers.conv2d_transpose(net,
+                                             filters=64,
+                                             kernel_size=4,
+                                             strides=2,
+                                             padding='same',
+                                             kernel_initializer=normal_initializer,
+                                             trainable=is_training,
+                                             name='tconv3')
+
+            net = tf.layers.batch_normalization(net,
+                                                training=is_training,
+                                                name='tconv3/batch_normalization')
+            net = tf.nn.relu(net, name='tconv3/relu')
+
+            # deconv output = [batch, 32, 32, 3]
+            net = tf.layers.conv2d_transpose(net,
+                                             filters=3,
+                                             kernel_size=4,
+                                             strides=2,
+                                             padding='same',
+                                             kernel_initializer=normal_initializer,
+                                             trainable=is_training,
+                                             name='tconv4')
+
+            net = tf.tanh(net, name='tconv4/tanh')
+
+            return net
+
+    def cifar10_discriminator(self, inputs, is_training=False, reuse=False, name='discriminator'):
         '''
 
-        :param x:
+        :param is_training:
+        :param reuse:
+        :param name:
         :return:
         '''
-        fc1 = tf.matmul(x, self.g_fc1_W) + self.g_fc1_b
-        fc1 = tf.nn.relu(fc1)
-        fc3 = tf.matmul(fc1, self.g_fc2_W) + self.g_fc2_b
-        fc3 = tf.nn.tanh(fc3)
-        return fc3
+        with tf.variable_scope(name, reuse=reuse):
+            normal_initializer = tf.random_normal_initializer(mean=0.0, stddev=0.02)
 
-    def discriminator_layers_mnist(self):
+            # Convolution outputs [batch, 16, 16, 64]
+            net = tf.layers.conv2d(inputs,
+                                   filters=64,
+                                   kernel_size=4,
+                                   strides=2,
+                                   padding='same',
+                                   kernel_initializer=normal_initializer,
+                                   trainable=is_training,
+                                   name='conv1')
+
+            net = tf.nn.leaky_relu(net, alpha=0.2, name='conv1/leaky_relu')
+
+            # Convolution outputs [batch, 8, 8, 256]
+            net = tf.layers.conv2d(net,
+                                   filters=256,
+                                   kernel_size=4,
+                                   strides=2,
+                                   padding='same',
+                                   kernel_initializer=normal_initializer,
+                                   trainable=is_training,
+                                   name='conv2')
+
+            net = tf.layers.batch_normalization(net,
+                                                training=is_training,
+                                                name='conv2/batch_normalization')
+
+            net = tf.nn.leaky_relu(net, alpha=0.2, name='conv2/leaky_relu')
+
+            # Convolution outputs [batch, 4, 4, 1024]
+            net = tf.layers.conv2d(net,
+                                   filters=1024,
+                                   kernel_size=4,
+                                   strides=2,
+                                   padding='same',
+                                   kernel_initializer=normal_initializer,
+                                   trainable=is_training,
+                                   name='conv3')
+
+            net = tf.layers.batch_normalization(net,
+                                                training=is_training,
+                                                name='conv3/batch_normalization')
+
+            net = tf.nn.leaky_relu(net, alpha=0.2, name='conv3/leaky_relu')
+
+            # Convolution outputs [batch, 1, 1, 1]
+            net = tf.layers.conv2d(net,
+                                   filters=1,
+                                   kernel_size=4,
+                                   padding='valid',
+                                   kernel_initializer=normal_initializer,
+                                   trainable=is_training,
+                                   name='conv4')
+
+            # Squeeze height and width dimensions
+            net = tf.squeeze(net, [1, 2, 3])
+
+            return net
+
+    def mnist_generator(self, inputs, is_training=False, reuse=False, name='generator'):
         '''
 
-        :param x:
+        :param inputs:
+        :param is_training:
+        :param reuse:
+        :param name:
         :return:
         '''
-        self.d_fc1_W = tf.Variable(xavier_init([784, 128]))
-        self.d_fc1_b = tf.Variable(tf.zeros(128))
+        with tf.variable_scope(name, reuse=reuse):
+            normal_initializer = tf.random_normal_initializer(mean=0.0, stddev=xavier_std([100]))
 
-        self.d_fc2_W = tf.Variable(xavier_init([128, 1]))
-        self.d_fc2_b = tf.Variable(tf.zeros(1))
+            inputs = tf.expand_dims(tf.expand_dims(inputs, 1), 1)
 
-        self.theta_D = [self.d_fc1_W, self.d_fc1_b, self.d_fc2_W, self.d_fc2_b]
+            # FC layer 1: output dim = [batch, 128]
+            net = tf.layers.dense(inputs,
+                                  units=128,
+                                  kernel_initializer=normal_initializer,
+                                  trainable=is_training,
+                                  name='fc1')
+            # net = tf.layers.batch_normalization(net,
+            #                                     training=is_training,
+            #                                     name='fc1/batch_normalization')
+            net = tf.nn.relu(net, name='fc1/relu')
 
-    def discriminator_ops_mnist(self, x):
+            # FC layer 2: output dim = [batch, 784]
+            net = tf.layers.dense(net,
+                                  units=784,
+                                  kernel_initializer=normal_initializer,
+                                  trainable=is_training,
+                                  name='fc2')
+            # net = tf.layers.batch_normalization(net,
+            #                                     training=is_training,
+            #                                     name='fc2/batch_normalization')
+            net = tf.nn.tanh(net, name='fc2/tanh')
+            net = tf.reshape(net, [-1, 784])
+
+            return net
+
+    def mnist_discriminator(self, inputs, is_training=False, reuse=False, name='discriminator'):
         '''
 
+        :param inputs:
+        :param is_training:
+        :param reuse:
+        :param name:
         :return:
         '''
-        fc1 = tf.matmul(x, self.d_fc1_W) + self.d_fc1_b
-        fc1 = tf.nn.relu(fc1)
-        logit = tf.matmul(fc1, self.d_fc2_W) + self.d_fc2_b
-        prob = tf.nn.sigmoid(logit)
-        return prob, logit
+        with tf.variable_scope(name, reuse=reuse):
+            normal_initializer = tf.random_normal_initializer(mean=0.0, stddev=xavier_std([100]))
 
-    def generator_layers_cifar10(self):
-        '''
+            # FC layer 1: output dim = [batch, 128]
+            net = tf.layers.dense(inputs,
+                                  units=128,
+                                  kernel_initializer=normal_initializer,
+                                  trainable=is_training,
+                                  name='fc1')
+            net = tf.nn.relu(net, name='fc1/relu')
 
-        :return:
-        '''
-        self.g_fc1_W = tf.Variable(xavier_init([3072, 8000]))
-        self.g_fc1_b = tf.Variable(tf.zeros(8000))
+            # FC layer 2: output dim = [batch, 1]
+            net = tf.layers.dense(net,
+                                  units=1,
+                                  kernel_initializer=normal_initializer,
+                                  trainable=is_training,
+                                  name='fc2')
+            net = tf.nn.sigmoid(net, name='fc2/sigmoid')
+            net = tf.squeeze(net, [1])
 
-        self.g_fc2_W = tf.Variable(xavier_init([8000, 8000]))
-        self.g_fc2_b = tf.Variable(tf.zeros(8000))
-
-        self.theta_G = [self.g_fc1_W, self.g_fc1_W, self.g_fc2_W, self.g_fc2_b]
-
-    def generator_ops_cifar10(self,x):
-        '''
-
-        :param x:
-        :return:
-        '''
-        fc1 = tf.matmul(x, self.g_fc1_W) + self.g_fc1_b
-        fc1 = tf.nn.relu(fc1)
-        fc2 = tf.matmul(fc1, self.g_fc2_W) + self.g_fc2_b
-        fc2 = tf.nn.tanh(fc2)
-        conv0 = tf.reshape(fc2, shape=[-1, 10, 10, 80])
-        self.deconv = tf.layers.conv2d_transpose(conv0, filters=3, kernel_size=(5, 5), strides=(3, 3))
-
-        # self.theta_G.append(self.deconv)
-        return self.deconv
-
-    def discriminator_layers_cifar10(self):
-        '''
-
-        :return:
-        '''
-        mu = 0
-        sigma = 0.01
-        self.d_conv1_W = tf.Variable(tf.truncated_normal(shape=(8,8,3,32), mean=mu, stddev=sigma))
-        self.d_conv1_b = tf.Variable(tf.zeros(32))
-
-        self.d_conv2_W = tf.Variable(tf.truncated_normal(shape=(8, 8, 32, 32), mean=mu, stddev=sigma))
-        self.d_conv2_b = tf.Variable(tf.zeros(32))
-
-        self.d_conv3_W = tf.Variable(tf.truncated_normal(shape=(5, 5, 32, 192), mean=mu, stddev=sigma))
-        self.d_conv3_b = tf.Variable(tf.zeros(192))
-
-        self.d_fc1_W = tf.Variable(xavier_init([3072, 500]))
-        self.d_fc1_b = tf.Variable(tf.zeros(500))
-
-        self.d_fc2_W = tf.Variable(xavier_init([5, 1]))
-        self.d_fc2_b = tf.Variable(tf.zeros(1))
-
-        self.theta_D = [self.d_conv1_W, self.d_conv1_b, self.d_conv2_W, self.d_conv2_b, self.d_conv3_W, self.d_conv3_b,
-                        self.d_fc1_W, self.d_fc1_b, self.d_fc2_W, self.d_fc2_b]
-
-    def discriminator_ops_cifar10(self, x):
-        '''
-
-        :param x:
-        :return:
-        '''
-        padding_1 = tf.constant([[0, 0], [4, 4], [4, 4], [0, 0]])
-        x = tf.pad(x, padding_1, "CONSTANT")
-        conv1 = tf.nn.conv2d(x, self.d_conv1_W, strides=[1, 1, 1, 1], padding='VALID') + self.d_conv1_b
-        conv1 = tf.nn.max_pool(conv1, ksize=[1, 4, 4, 1], strides=[1, 2, 2, 1], padding='VALID')
-
-        padding_2 = tf.constant([[0, 0], [3, 3], [3, 3], [0, 0]])
-        conv1 = tf.pad(conv1, padding_2, "CONSTANT")
-        conv2 = tf.nn.conv2d(conv1, self.d_conv2_W, strides=[1, 1, 1, 1], padding='VALID') + self.d_conv2_b
-        conv2 = tf.nn.max_pool(conv2, ksize=[1, 4, 4, 1], strides=[1, 2, 2, 1], padding='VALID')
-
-        padding_3 = tf.constant([[0, 0], [3, 3], [3, 3], [0, 0]])
-        conv2 = tf.pad(conv2, padding_3, "CONSTANT")
-        conv3 = tf.nn.conv2d(conv2, self.d_conv3_W, strides=[1, 1, 1, 1], padding='VALID') + self.d_conv3_b
-        conv3 = tf.nn.max_pool(conv3, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='VALID')
-
-        fc0 = tf.contrib.layers.flatten(conv3)
-
-        fc1 = tf.matmul(fc0, self.d_fc1_W) + self.d_fc1_b
-        fc1 = tf.contrib.layers.maxout(fc1, num_units=5)
-
-        logit = tf.matmul(fc1, self.d_fc2_W) + self.d_fc2_b
-        prob = tf.nn.sigmoid(logit)
-        return prob, logit
+            return net
